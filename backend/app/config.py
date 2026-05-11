@@ -16,9 +16,12 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = "medium"  # minimal | low | medium | high
     openai_max_tool_iterations: int = 6
     openai_realtime_model: str = "gpt-realtime-2"
+    openai_realtime_reasoning_effort: str = "medium"
     openai_realtime_voice: str = "marin"
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     openai_realtime_secret_ttl_seconds: int = 600
+    realtime_debug_log_enabled: bool = True
+    realtime_debug_log_path: str = "logs/realtime_debug.jsonl"
 
     # ── Azure OpenAI (legacy / optional) ───────────────────────────
     azure_openai_endpoint: str = ""
