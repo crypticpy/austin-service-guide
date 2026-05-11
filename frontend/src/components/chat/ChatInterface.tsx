@@ -30,23 +30,32 @@ import type { IntakeMessage, IntakeSession, CrisisResource } from "@/types";
 interface ChatInterfaceProps {
   session: IntakeSession;
   onComplete?: (sessionId: string) => void;
+  initialMode?: "text" | "voice";
 }
 
 export default function ChatInterface({
   session,
   onComplete,
+  initialMode = "text",
 }: ChatInterfaceProps) {
+  const initialMessages = session.conversation ?? [];
   const [messages, setMessages] = useState<IntakeMessage[]>(
-    session.conversation ?? [],
+    initialMessages,
   );
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState(
+    initialMessages[initialMessages.length - 1]?.progress_percent ?? 0,
+  );
   const [isComplete, setIsComplete] = useState(false);
   const [crisisDetected, setCrisisDetected] = useState(false);
   const [crisisResources, setCrisisResources] = useState<CrisisResource[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const didAutoStartVoiceRef = useRef(false);
+  const didSpeakVoiceIntroRef = useRef(false);
+  const sessionIdRef = useRef(session.id);
+  const voiceStopRef = useRef<() => void>(() => undefined);
 
   const loadCrisisResources = useCallback(async () => {
     if (crisisDetected) return;
@@ -59,6 +68,47 @@ export default function ChatInterface({
     }
   }, [crisisDetected]);
 
+  const appendMessages = useCallback((incoming: IntakeMessage[]) => {
+    if (incoming.length === 0) return;
+    setMessages((prev) => {
+      const next = [...prev];
+      for (const message of incoming) {
+        const text = message.content.trim();
+        if (!text) continue;
+        const last = next[next.length - 1];
+        if (last?.role === message.role && last.content.trim() === text) {
+          continue;
+        }
+        if (
+          next.slice(-4).some(
+            (existing) =>
+              existing.role === message.role && existing.content.trim() === text,
+          )
+        ) {
+          continue;
+        }
+        next.push({ ...message, content: text });
+      }
+      return next;
+    });
+  }, []);
+
+  const handleVoiceLocalTranscript = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      appendMessages([
+        {
+          role,
+          content,
+          suggested_buttons: [],
+          progress_percent: progress,
+          is_complete: false,
+          crisis_detected: false,
+        },
+      ]);
+    },
+    [appendMessages, progress],
+  );
+
   const handleVoiceTranscriptSync = useCallback(
     (result: {
       messages: IntakeMessage[];
@@ -66,9 +116,7 @@ export default function ChatInterface({
       is_complete: boolean;
       crisis_detected: boolean;
     }) => {
-      if (result.messages.length > 0) {
-        setMessages((prev) => [...prev, ...result.messages]);
-      }
+      appendMessages(result.messages);
       setProgress(result.progress_percent);
       if (result.crisis_detected) {
         void loadCrisisResources();
@@ -77,7 +125,7 @@ export default function ChatInterface({
         setIsComplete(true);
       }
     },
-    [loadCrisisResources],
+    [appendMessages, loadCrisisResources],
   );
 
   const handleVoiceToolResult = useCallback(
@@ -99,39 +147,84 @@ export default function ChatInterface({
 
   const voice = useRealtimeVoiceSession({
     sessionId: session.id,
+    onLocalTranscript: handleVoiceLocalTranscript,
     onTranscriptSync: handleVoiceTranscriptSync,
     onToolResult: handleVoiceToolResult,
   });
 
   useEffect(() => {
+    voiceStopRef.current = voice.stop;
+  }, [voice.stop]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, voice.liveTranscript]);
 
   // Re-focus the input after the assistant's reply lands. The TextField is
   // disabled while isLoading is true, so a focus() call from the request's
   // finally block runs before React re-enables the input — this effect runs
   // after the render and reliably restores focus for the next turn.
   useEffect(() => {
-    if (!isLoading && !isComplete) {
+    if (!isLoading && !isComplete && !voice.isActive) {
       inputRef.current?.focus();
     }
-  }, [isLoading, isComplete]);
+  }, [isLoading, isComplete, voice.isActive]);
 
   useEffect(() => {
-    const convo = session.conversation ?? [];
-    if (convo.length > 0) {
+    if (sessionIdRef.current !== session.id) {
+      voiceStopRef.current();
+      sessionIdRef.current = session.id;
+      didAutoStartVoiceRef.current = false;
+      didSpeakVoiceIntroRef.current = false;
+      const convo = session.conversation ?? [];
       setMessages(convo);
-      const last = convo[convo.length - 1];
-      setProgress(last.progress_percent);
+      setInputValue("");
+      setIsLoading(false);
+      setProgress(convo[convo.length - 1]?.progress_percent ?? 0);
+      setIsComplete(false);
+      setCrisisDetected(false);
+      setCrisisResources([]);
     }
-  }, [session]);
+  }, [session.id, session.conversation]);
 
   useEffect(() => {
-    return () => voice.stop();
-  }, [voice.stop]);
+    return () => {
+      voiceStopRef.current();
+    };
+  }, []);
+
+  const estimateGreetingLockMs = useCallback((text: string) => {
+    if (!text.trim()) return 0;
+    return Math.min(8000, Math.max(2500, text.length * 45));
+  }, []);
+
+  const handleVoiceStart = useCallback(() => {
+    const language = getStoredLanguage();
+    const intro = messages.find((m) => m.role === "assistant")?.content || "";
+    const shouldSpeakIntro = !didSpeakVoiceIntroRef.current && !!intro.trim();
+    const startupMicLockMs = shouldSpeakIntro
+      ? estimateGreetingLockMs(intro)
+      : 0;
+    if (shouldSpeakIntro) didSpeakVoiceIntroRef.current = true;
+    voice.start(language, messages, getLanguageLabel(language), {
+      speakInitialGreeting: shouldSpeakIntro,
+      startupMicLockMs,
+    });
+  }, [estimateGreetingLockMs, messages, voice.start]);
+
+  useEffect(() => {
+    if (initialMode !== "voice" || didAutoStartVoiceRef.current) return;
+    const timer = window.setTimeout(() => {
+      if (didAutoStartVoiceRef.current) return;
+      didAutoStartVoiceRef.current = true;
+      handleVoiceStart();
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [handleVoiceStart, initialMode]);
 
   const handleSend = async (text: string) => {
     if (!text.trim() || isLoading || voice.isActive) return;
+    const activeSessionId = session.id;
 
     const userMsg: IntakeMessage = {
       role: "user",
@@ -149,10 +242,11 @@ export default function ChatInterface({
     try {
       const language = getStoredLanguage();
       const response = await sendIntakeMessage(
-        session.id,
+        activeSessionId,
         text.trim(),
         language,
       );
+      if (sessionIdRef.current !== activeSessionId) return;
       setMessages((prev) => [...prev, response]);
       setProgress(response.progress_percent);
 
@@ -164,6 +258,7 @@ export default function ChatInterface({
         setIsComplete(true);
       }
     } catch {
+      if (sessionIdRef.current !== activeSessionId) return;
       const errorMsg: IntakeMessage = {
         role: "assistant",
         content: "I'm sorry, something went wrong. Please try again.",
@@ -174,7 +269,9 @@ export default function ChatInterface({
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
-      setIsLoading(false);
+      if (sessionIdRef.current === activeSessionId) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -189,11 +286,6 @@ export default function ChatInterface({
     handleSend(value);
   };
 
-  const handleVoiceStart = () => {
-    const language = getStoredLanguage();
-    voice.start(language, messages, getLanguageLabel(language));
-  };
-
   const voiceLabel = (() => {
     switch (voice.status) {
       case "connecting":
@@ -204,6 +296,8 @@ export default function ChatInterface({
         return "Thinking";
       case "speaking":
         return "Assistant speaking";
+      case "finalizing":
+        return "Finalizing plan";
       case "connected":
         return "Voice connected";
       case "error":
@@ -215,7 +309,7 @@ export default function ChatInterface({
   const voicePulseColor =
     voice.status === "speaking"
       ? "secondary.main"
-      : voice.status === "thinking"
+      : voice.status === "thinking" || voice.status === "finalizing"
         ? "warning.main"
         : voice.status === "error"
           ? "error.main"
@@ -223,7 +317,8 @@ export default function ChatInterface({
   const voiceBarsActive =
     voice.status === "listening" ||
     voice.status === "speaking" ||
-    voice.status === "thinking";
+    voice.status === "thinking" ||
+    voice.status === "finalizing";
   const voiceDetail = (() => {
     if (voice.status === "error") {
       return voice.error || "Voice chat is unavailable.";
@@ -240,12 +335,24 @@ export default function ChatInterface({
         return "Preparing response";
       case "speaking":
         return "Playing response";
+      case "finalizing":
+        return "Wrapping up your service plan";
       case "connected":
         return "Voice session active";
       default:
         return "";
     }
   })();
+  const liveTranscriptMessage: IntakeMessage | null = voice.liveTranscript
+    ? {
+        role: voice.liveTranscriptRole || "assistant",
+        content: voice.liveTranscript,
+        suggested_buttons: [],
+        progress_percent: progress,
+        is_complete: false,
+        crisis_detected: false,
+      }
+    : null;
 
   return (
     <Box
@@ -331,7 +438,7 @@ export default function ChatInterface({
           flexDirection: "column",
         }}
       >
-        {messages.length === 0 && !isLoading && (
+        {messages.length === 0 && !isLoading && initialMode !== "voice" && (
           <Box
             sx={{
               flex: 1,
@@ -378,6 +485,10 @@ export default function ChatInterface({
               isLatest={idx === arr.length - 1}
             />
           ))}
+
+        {voice.isActive && liveTranscriptMessage && (
+          <ChatBubble message={liveTranscriptMessage} />
+        )}
 
         {/* Typing indicator */}
         {isLoading && (
@@ -509,12 +620,11 @@ export default function ChatInterface({
           bgcolor: "background.paper",
         }}
       >
-        {(voice.isActive || voice.status === "error") && (
+        {voice.isActive || voice.status === "error" ? (
           <Box
             role="status"
             aria-label={voiceLabel}
             sx={{
-              mb: 1.25,
               px: { xs: 1.25, sm: 1.5 },
               py: 1.25,
               borderRadius: 2,
@@ -531,6 +641,7 @@ export default function ChatInterface({
               display: "flex",
               alignItems: "center",
               gap: 1.25,
+              minHeight: 56,
             }}
           >
             <Avatar
@@ -631,13 +742,22 @@ export default function ChatInterface({
                         key={i}
                         sx={{
                           width: 3,
-                          height: voice.status === "thinking" ? 5 : 10 + (i % 2) * 5,
+                          height:
+                            voice.status === "thinking" ||
+                            voice.status === "finalizing"
+                              ? 5
+                              : 10 + (i % 2) * 5,
                           borderRadius: 2,
                           bgcolor: voicePulseColor,
-                          opacity: voice.status === "thinking" ? 0.55 : 0.85,
+                          opacity:
+                            voice.status === "thinking" ||
+                            voice.status === "finalizing"
+                              ? 0.55
+                              : 0.85,
                           "@media (prefers-reduced-motion: no-preference)": {
                             animation:
-                              voice.status === "thinking"
+                              voice.status === "thinking" ||
+                              voice.status === "finalizing"
                                 ? "voiceDots 1.1s ease-in-out infinite"
                                 : "voiceWave 0.9s ease-in-out infinite",
                             animationDelay: `${i * 0.12}s`,
@@ -676,7 +796,7 @@ export default function ChatInterface({
                 {voiceDetail}
               </Typography>
             </Box>
-            {voice.isActive && (
+            {voice.isActive ? (
               <>
                 <Tooltip title={voice.isMuted ? "Unmute microphone" : "Mute microphone"}>
                   <IconButton
@@ -712,84 +832,94 @@ export default function ChatInterface({
                   </IconButton>
                 </Tooltip>
               </>
+            ) : (
+              <Tooltip title="Try voice chat again">
+                <IconButton
+                  size="small"
+                  color="primary"
+                  onClick={handleVoiceStart}
+                  disabled={isLoading || isComplete}
+                  aria-label="Try voice chat again"
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "rgba(68, 73, 156, 0.22)",
+                    bgcolor: "rgba(68, 73, 156, 0.06)",
+                    width: 34,
+                    height: 34,
+                  }}
+                >
+                  <MicIcon />
+                </IconButton>
+              </Tooltip>
             )}
           </Box>
+        ) : (
+          <Box sx={{ display: "flex", gap: 1, alignItems: "flex-end" }}>
+            <Tooltip title="Start voice chat">
+              <span>
+                <IconButton
+                  color="primary"
+                  onClick={handleVoiceStart}
+                  disabled={isLoading || isComplete}
+                  aria-label="Start voice chat"
+                  sx={{
+                    bgcolor: "grey.100",
+                    color: "primary.main",
+                    width: 44,
+                    height: 44,
+                    "&:hover": { bgcolor: "grey.200" },
+                    "&:disabled": { bgcolor: "grey.200", color: "grey.500" },
+                  }}
+                >
+                  {voice.status === "connecting" ? (
+                    <CircularProgress size={20} />
+                  ) : (
+                    <MicIcon sx={{ fontSize: 20 }} />
+                  )}
+                </IconButton>
+              </span>
+            </Tooltip>
+            <TextField
+              inputRef={inputRef}
+              fullWidth
+              multiline
+              maxRows={4}
+              placeholder={isComplete ? "Intake complete" : "Type your message..."}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading || isComplete}
+              variant="outlined"
+              size="small"
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: "24px",
+                  bgcolor: "grey.50",
+                },
+              }}
+            />
+            <IconButton
+              color="primary"
+              onClick={() => handleSend(inputValue)}
+              disabled={!inputValue.trim() || isLoading || isComplete}
+              aria-label="Send message"
+              sx={{
+                bgcolor: "primary.main",
+                color: "white",
+                width: 44,
+                height: 44,
+                "&:hover": { bgcolor: "primary.dark" },
+                "&:disabled": { bgcolor: "grey.300", color: "grey.500" },
+              }}
+            >
+              {isLoading ? (
+                <CircularProgress size={20} sx={{ color: "white" }} />
+              ) : (
+                <SendIcon sx={{ fontSize: 20 }} />
+              )}
+            </IconButton>
+          </Box>
         )}
-        <Box sx={{ display: "flex", gap: 1, alignItems: "flex-end" }}>
-          <Tooltip title={voice.isActive ? "Voice chat active" : "Start voice chat"}>
-            <span>
-              <IconButton
-                color={voice.isActive ? "secondary" : "primary"}
-                onClick={handleVoiceStart}
-                disabled={isLoading || isComplete || voice.isActive}
-                aria-label="Start voice chat"
-                sx={{
-                  bgcolor: voice.isActive ? "secondary.main" : "grey.100",
-                  color: voice.isActive ? "white" : "primary.main",
-                  width: 44,
-                  height: 44,
-                  "&:hover": {
-                    bgcolor: voice.isActive ? "secondary.dark" : "grey.200",
-                  },
-                  "&:disabled": { bgcolor: "grey.200", color: "grey.500" },
-                }}
-              >
-                {voice.status === "connecting" ? (
-                  <CircularProgress size={20} />
-                ) : (
-                  <MicIcon sx={{ fontSize: 20 }} />
-                )}
-              </IconButton>
-            </span>
-          </Tooltip>
-          <TextField
-            inputRef={inputRef}
-            fullWidth
-            multiline
-            maxRows={4}
-            placeholder={
-              isComplete
-                ? "Intake complete"
-                : voice.isActive
-                  ? "Voice chat active"
-                  : "Type your message..."
-            }
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading || isComplete || voice.isActive}
-            variant="outlined"
-            size="small"
-            sx={{
-              "& .MuiOutlinedInput-root": {
-                borderRadius: "24px",
-                bgcolor: "grey.50",
-              },
-            }}
-          />
-          <IconButton
-            color="primary"
-            onClick={() => handleSend(inputValue)}
-            disabled={
-              !inputValue.trim() || isLoading || isComplete || voice.isActive
-            }
-            aria-label="Send message"
-            sx={{
-              bgcolor: "primary.main",
-              color: "white",
-              width: 44,
-              height: 44,
-              "&:hover": { bgcolor: "primary.dark" },
-              "&:disabled": { bgcolor: "grey.300", color: "grey.500" },
-            }}
-          >
-            {isLoading ? (
-              <CircularProgress size={20} sx={{ color: "white" }} />
-            ) : (
-              <SendIcon sx={{ fontSize: 20 }} />
-            )}
-          </IconButton>
-        </Box>
       </Box>
     </Box>
   );
