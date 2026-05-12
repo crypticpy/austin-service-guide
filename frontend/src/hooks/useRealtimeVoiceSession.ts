@@ -1444,6 +1444,10 @@ export function useRealtimeVoiceSession({
         }
         if (audioRef.current === ownedAudio) audioRef.current = null;
       };
+      // Re-arm debug logging before any recordDebug() call so a prior
+      // session that latched it off after a 404 doesn't suppress the very
+      // first event of this new session.
+      resetRealtimeDebugLogDisabled();
       recordDebug("voice_start_requested", {
         language,
         conversation_length: conversation.length,
@@ -1467,9 +1471,6 @@ export function useRealtimeVoiceSession({
       stoppedRef.current = false;
       transcriptItemIdsRef.current.clear();
       resetSessionState();
-      // Re-arm debug logging in case a prior session latched it off after a
-      // 404. The server-side gate may have flipped on between sessions.
-      resetRealtimeDebugLogDisabled();
       setError("");
       clearLiveTranscript();
       setStatus("connecting");
