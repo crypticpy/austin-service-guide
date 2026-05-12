@@ -1057,26 +1057,37 @@ export function useRealtimeVoiceSession({
           setStatus("connected");
         }
         if (!sessionUpdateSentRef.current && sessionConfigRef.current) {
-          sessionUpdateSentRef.current = true;
           const initialInstructions =
             typeof sessionConfigRef.current.instructions === "string"
               ? (sessionConfigRef.current.instructions as string)
               : "";
-          recordDebug(
-            "session_update_sent",
-            realtimeSessionSummary(sessionConfigRef.current),
-          );
           const sent = sendEvent({
             type: "session.update",
             session: sessionConfigRef.current,
           });
-          if (sent) {
-            // Only seed the diff baseline after the channel actually
-            // accepted the update. If sendEvent dropped (data channel not
-            // open yet), the first post-tool refresh will resend the same
-            // snapshot rather than being suppressed as a no-op.
-            lastPushedInstructionsRef.current = initialInstructions;
+          if (!sent) {
+            // The data channel rejected the initial session.update, so the
+            // model never received tools/instructions. Don't let the
+            // fallback timer mark the session ready — fail fast so the
+            // user can retry rather than continuing in a misconfigured
+            // state where the "Currently known" prompt and tool flow
+            // silently don't work.
+            recordDebug("session_update_initial_send_failed", {
+              data_channel_state: dcRef.current?.readyState ?? "missing",
+            });
+            setError("Could not configure the realtime voice session.");
+            setStatus("error");
+            stopSessionRef.current?.();
+            return;
           }
+          sessionUpdateSentRef.current = true;
+          recordDebug(
+            "session_update_sent",
+            realtimeSessionSummary(sessionConfigRef.current),
+          );
+          // Seed the diff baseline only after the send succeeded so the
+          // first post-tool refresh isn't suppressed as a no-op.
+          lastPushedInstructionsRef.current = initialInstructions;
           if (sessionUpdateTimerRef.current) {
             window.clearTimeout(sessionUpdateTimerRef.current);
           }

@@ -284,12 +284,14 @@ export function logRealtimeDebugEvent(
     // (REALTIME_DEBUG_LOG_ENABLED=false). Latch and swallow so the burst of
     // in-flight POSTs that fired before the first 404 arrived doesn't each
     // surface as an unhandled rejection. A 404 with detail="Session not
-    // found" means just this sessionId is stale — don't latch, since a
-    // subsequent valid session should still log.
-    if (err instanceof ApiError && err.status === 404) {
-      if (isDebugEndpointDisabledDetail(err.message)) {
-        realtimeDebugLogDisabled = true;
-      }
+    // found" means just this sessionId is stale — re-throw so the caller
+    // can see it; we don't latch so a subsequent valid session still logs.
+    if (
+      err instanceof ApiError &&
+      err.status === 404 &&
+      isDebugEndpointDisabledDetail(err.message)
+    ) {
+      realtimeDebugLogDisabled = true;
       return null;
     }
     throw err;
