@@ -22,10 +22,7 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import ChatBubble from "./ChatBubble";
 import { sendIntakeMessage, getCrisisResources } from "@/lib/api";
 import { useRealtimeVoiceSession } from "@/hooks/useRealtimeVoiceSession";
-import {
-  getLanguageLabel,
-  getStoredLanguage,
-} from "@/components/common/LanguageSelector";
+import { getStoredLanguage } from "@/components/common/LanguageSelector";
 import type { IntakeMessage, IntakeSession, CrisisResource } from "@/types";
 
 interface ChatInterfaceProps {
@@ -216,7 +213,7 @@ export default function ChatInterface({
       ? estimateGreetingLockMs(intro)
       : 0;
     if (shouldSpeakIntro) didSpeakVoiceIntroRef.current = true;
-    voice.start(language, messages, getLanguageLabel(language), {
+    voice.start(language, messages, {
       speakInitialGreeting: shouldSpeakIntro,
       startupMicLockMs,
     });

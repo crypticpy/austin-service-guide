@@ -423,13 +423,11 @@ export function useRealtimeVoiceSession({
   const clearLiveTranscriptIfCurrent = useCallback(
     (role: LiveTranscriptRole, text: string) => {
       if (liveTranscriptRoleRef.current !== role) return;
-      setLiveTranscript((current) => {
-        if (current.trim() !== text.trim()) return current;
-        liveTranscriptRef.current = "";
-        liveTranscriptRoleRef.current = null;
-        setLiveTranscriptRole(null);
-        return "";
-      });
+      if (liveTranscriptRef.current.trim() !== text.trim()) return;
+      liveTranscriptRef.current = "";
+      liveTranscriptRoleRef.current = null;
+      setLiveTranscript("");
+      setLiveTranscriptRole(null);
     },
     [],
   );
@@ -1349,7 +1347,6 @@ export function useRealtimeVoiceSession({
     async (
       language: string,
       conversation: IntakeMessage[],
-      _languageLabel = language,
       options: RealtimeStartOptions = {},
     ) => {
       const startId = startGenerationRef.current + 1;
