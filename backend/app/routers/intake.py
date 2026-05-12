@@ -138,11 +138,24 @@ async def start_intake(body: IntakeStartRequest | None = None):
     }
 
 
+def _require_realtime_debug_enabled() -> None:
+    """Reject debug-endpoint access when disk-backed traces are disabled.
+
+    The realtime debug endpoints expose short transcript previews and are
+    intended only for local troubleshooting. Gating them on the same env
+    flag that enables the on-disk log avoids leaking traces in any
+    deployment that did not opt into them.
+    """
+    if not get_settings().realtime_debug_log_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/realtime/debug/sessions")
 async def read_realtime_debug_sessions(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """Return recent Realtime voice debug sessions."""
+    _require_realtime_debug_enabled()
     return {"sessions": get_realtime_debug_sessions(limit=limit)}
 
 
@@ -358,6 +371,7 @@ async def write_realtime_debug_event(
     body: RealtimeDebugEventRequest,
 ):
     """Record a client-side Realtime voice debug event for this session."""
+    _require_realtime_debug_enabled()
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -379,6 +393,7 @@ async def read_realtime_debug_events(
     limit: int = Query(default=200, ge=1, le=500),
 ):
     """Return recent Realtime voice debug events for this session."""
+    _require_realtime_debug_enabled()
     session = get_session(session_id)
     events = get_realtime_debug_events(session_id, limit=limit)
     if not session and not events:
