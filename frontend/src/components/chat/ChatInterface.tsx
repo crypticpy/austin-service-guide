@@ -157,7 +157,15 @@ export default function ChatInterface({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading, voice.liveTranscript]);
+  }, [messages, isLoading]);
+
+  // The streaming voice bubble grows token-by-token; smooth-scrolling each
+  // delta fights the moving target and makes the bubble look herky-jerky.
+  // Use instant scroll so the viewport just stays pinned to the bottom.
+  useEffect(() => {
+    if (!voice.liveTranscript) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [voice.liveTranscript]);
 
   // Re-focus the input after the assistant's reply lands. The TextField is
   // disabled while isLoading is true, so a focus() call from the request's
@@ -490,11 +498,20 @@ export default function ChatInterface({
               message={msg}
               onButtonClick={handleButtonClick}
               isLatest={idx === arr.length - 1}
+              // During voice the latest bubble is replacing the live-
+              // streaming bubble in place; replaying the entry animation
+              // makes it feel like a redraw. Suppress it so the swap is
+              // visually seamless.
+              suppressEntryAnimation={voice.isActive && idx === arr.length - 1}
             />
           ))}
 
         {voice.isActive && liveTranscriptMessage && (
-          <ChatBubble message={liveTranscriptMessage} />
+          <ChatBubble
+            key="voice-live-bubble"
+            message={liveTranscriptMessage}
+            streaming
+          />
         )}
 
         {/* Typing indicator */}

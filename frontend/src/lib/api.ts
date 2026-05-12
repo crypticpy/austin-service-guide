@@ -194,6 +194,13 @@ export interface RealtimeToolResult {
   is_complete: boolean;
   crisis_detected: boolean;
   match_count?: number;
+  /**
+   * Present after state-mutating tool calls (extract_profile, set_language,
+   * complete_intake). The voice hook diff-checks this against the last-pushed
+   * instructions and emits a `session.update` so the realtime model picks up
+   * the refreshed "Currently known" snapshot before its next response.
+   */
+  refreshed_instructions?: string;
 }
 
 export function executeRealtimeTool(
@@ -238,6 +245,14 @@ export interface RealtimeDebugEvent {
   detail: Record<string, unknown>;
 }
 
+// The realtime debug endpoint is gated by REALTIME_DEBUG_LOG_ENABLED on the
+// backend. When it's off, every recordDebug() call (status change, tool
+// dispatch, transport event…) would otherwise POST and get back a 404,
+// spamming the console. After the first 404 we latch this flag and skip
+// further POSTs for the rest of the page lifetime. console.debug() in the
+// caller still runs so local devs see events.
+let realtimeDebugLogDisabled = false;
+
 export function logRealtimeDebugEvent(
   sessionId: string,
   body: {
@@ -247,6 +262,9 @@ export function logRealtimeDebugEvent(
     detail?: Record<string, unknown>;
   },
 ) {
+  if (realtimeDebugLogDisabled) {
+    return Promise.resolve(null);
+  }
   return apiRequest<{ ok: boolean; event: RealtimeDebugEvent }>(
     "POST",
     `/api/v1/intake/${sessionId}/realtime/debug`,
@@ -256,7 +274,12 @@ export function logRealtimeDebugEvent(
       ...body,
     },
     { timeoutMs: 5000 },
-  );
+  ).catch((err) => {
+    if (err instanceof ApiError && err.status === 404) {
+      realtimeDebugLogDisabled = true;
+    }
+    throw err;
+  });
 }
 
 export function getRealtimeDebugEvents(sessionId: string, limit = 200) {
