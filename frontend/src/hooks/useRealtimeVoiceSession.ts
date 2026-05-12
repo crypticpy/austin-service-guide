@@ -1382,6 +1382,28 @@ export function useRealtimeVoiceSession({
         return;
       }
 
+      // Defensive teardown: if a previous session left transport handles
+      // around (e.g., a fatal-error path before stop() was reachable), close
+      // them now before we allocate new ones to avoid mic + WebRTC leaks.
+      if (
+        streamRef.current ||
+        dcRef.current ||
+        pcRef.current ||
+        audioRef.current
+      ) {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        dcRef.current?.close();
+        dcRef.current = null;
+        pcRef.current?.close();
+        pcRef.current = null;
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.srcObject = null;
+          audioRef.current.remove();
+          audioRef.current = null;
+        }
+      }
       stoppedRef.current = false;
       transcriptItemIdsRef.current.clear();
       resetSessionState();
@@ -1468,10 +1490,11 @@ export function useRealtimeVoiceSession({
             connection_state: pc.connectionState,
             ice_connection_state: pc.iceConnectionState,
           });
-          if (
-            pc.connectionState === "failed" ||
-            pc.connectionState === "disconnected"
-          ) {
+          // Only "failed" is terminal per the WebRTC spec — "disconnected"
+          // is transient and frequently recovers, so tearing the session
+          // down on it causes false-positive errors during brief network
+          // blips.
+          if (pc.connectionState === "failed") {
             stop();
             setError("Realtime voice connection was interrupted.");
             setStatus("error");
