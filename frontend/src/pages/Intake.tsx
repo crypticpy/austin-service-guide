@@ -30,6 +30,8 @@ type Phase = "checking" | "choosing" | "recovering" | "starting" | "ready";
 const LIFE_EVENT_ALIASES: Record<string, string> = {
   "job-loss": "lost-job",
   "food-help": "need-food",
+  "facing-eviction": "housing-crisis",
+  "behind-on-rent": "housing-crisis",
   "having-baby": "new-baby",
   "medical-help": "need-healthcare",
   healthcare: "need-healthcare",

@@ -155,7 +155,13 @@ def record_realtime_debug_event(
     session_id: str,
     event: dict[str, Any],
 ) -> dict[str, Any]:
-    """Store a bounded Realtime troubleshooting event for an intake session."""
+    """Store a bounded Realtime troubleshooting event for an intake session.
+
+    Short-circuits entirely when REALTIME_DEBUG_LOG_ENABLED is false so the
+    default-off privacy posture also covers in-memory storage and log lines.
+    """
+    if not get_settings().realtime_debug_log_enabled:
+        return {}
     _realtime_debug_seq[session_id] = _realtime_debug_seq.get(session_id, 0) + 1
     detail = event.get("detail", {})
     entry = {
@@ -426,8 +432,16 @@ async def process_message(
     crisis_kind = _check_crisis(user_text)
     if crisis_kind:
         session.extracted_profile.crisis_indicators.append(crisis_kind)
-        if crisis_kind:
-            return _crisis_response(session)
+        crisis_msg = _crisis_response(session)
+        # Mirror the exchange into the Responses-API context so a subsequent
+        # turn (e.g., "Continue finding services") has the prior crisis
+        # context. Otherwise _responses_flow would resume with no record of
+        # what was discussed.
+        session.responses_input.append({"role": "user", "content": user_text})
+        session.responses_input.append(
+            {"role": "assistant", "content": crisis_msg.content}
+        )
+        return crisis_msg
 
     scenario_followup = _scenario_first_followup(session, user_text)
     if scenario_followup is not None:
@@ -1608,16 +1622,31 @@ def _tool_extract_profile(session: IntakeSession, args: dict[str, Any]) -> str:
 
     children = args.get("school_age_children")
     if children and isinstance(children, list):
-        # Overwrite (not merge) — the model has the latest picture.
+        # Overwrite (not merge) — the model has the latest picture. Filter
+        # out malformed items (non-dict) before dereferencing so a stray
+        # entry doesn't crash the whole extract_profile tool call.
+        valid_children = [c for c in children if isinstance(c, dict)]
+        ignored_count = len(children) - len(valid_children)
         profile.school_age_children = [
             SchoolAgeChild(
                 grade=str(c.get("grade") or "").strip(),
                 district=str(c.get("district") or "").strip(),
-                concerns=[str(x).lower() for x in (c.get("concerns") or [])],
+                concerns=[
+                    str(x).lower()
+                    for x in (
+                        c.get("concerns")
+                        if isinstance(c.get("concerns"), list)
+                        else []
+                    )
+                ],
             )
-            for c in children
+            for c in valid_children
         ]
         applied["school_age_children"] = [c.model_dump() for c in profile.school_age_children]
+        if ignored_count:
+            applied["school_age_children_ignored"] = (
+                f"{ignored_count} non-object entries skipped"
+            )
     elif children:
         applied["school_age_children_ignored"] = "expected array of child profiles"
 

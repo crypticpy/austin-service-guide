@@ -43,8 +43,11 @@ class Settings(BaseSettings):
     # Public origin used to build shareable URLs (QR codes, SMS links)
     public_origin: str = "http://localhost:5173"
 
-    # CORS origins allowed by the API
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    # CORS origins allowed by the API. Keep in sync with backend/.env.example.
+    cors_origins: str = (
+        "http://localhost:5173,http://localhost:5174,http://localhost:3000,"
+        "http://127.0.0.1:5173,http://127.0.0.1:5174"
+    )
 
     # App metadata
     app_name: str = "Austin Service Guide API"

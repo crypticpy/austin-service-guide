@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Box from "@mui/material/Box";
+import { alpha } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
 import LinearProgress from "@mui/material/LinearProgress";
@@ -193,6 +194,14 @@ export default function ChatInterface({
       voiceStopRef.current();
     };
   }, []);
+
+  // If voice startup fails (mic denied, network blip), unflip the "intro
+  // already spoken" guard so a retry actually replays the greeting.
+  useEffect(() => {
+    if (voice.status === "error") {
+      didSpeakVoiceIntroRef.current = false;
+    }
+  }, [voice.status]);
 
   const estimateGreetingLockMs = useCallback((text: string) => {
     if (!text.trim()) return 0;
@@ -625,34 +634,34 @@ export default function ChatInterface({
           <Box
             role="status"
             aria-label={voiceLabel}
-            sx={{
+            sx={(theme) => ({
               px: { xs: 1.25, sm: 1.5 },
               py: 1.25,
               borderRadius: 2,
               border: "1px solid",
               borderColor:
                 voice.status === "error"
-                  ? "rgba(248, 49, 37, 0.28)"
-                  : "rgba(68, 73, 156, 0.18)",
+                  ? alpha(theme.palette.error.main, 0.28)
+                  : alpha(theme.palette.primary.main, 0.18),
               bgcolor: "background.paper",
               boxShadow:
                 voice.status === "error"
-                  ? "0 4px 14px rgba(248, 49, 37, 0.08)"
-                  : "0 4px 14px rgba(34, 37, 78, 0.08)",
+                  ? `0 4px 14px ${alpha(theme.palette.error.main, 0.08)}`
+                  : `0 4px 14px ${alpha(theme.palette.text.primary, 0.08)}`,
               display: "flex",
               alignItems: "center",
               gap: 1.25,
               minHeight: 56,
-            }}
+            })}
           >
             <Avatar
-              sx={{
+              sx={(theme) => ({
                 width: 36,
                 height: 36,
                 bgcolor: voicePulseColor,
                 position: "relative",
                 flexShrink: 0,
-                boxShadow: "0 2px 8px rgba(34, 37, 78, 0.16)",
+                boxShadow: `0 2px 8px ${alpha(theme.palette.text.primary, 0.16)}`,
                 "&::before": voice.isActive
                   ? {
                       content: '""',
@@ -681,7 +690,7 @@ export default function ChatInterface({
                       },
                     }
                   : undefined,
-              }}
+              })}
             >
               {voice.isMuted ? (
                 <MicOffIcon sx={{ fontSize: 18 }} />
@@ -699,18 +708,18 @@ export default function ChatInterface({
                 }}
               >
                 <Box
-                  sx={{
+                  sx={(theme) => ({
                     px: 0.75,
                     py: 0.25,
                     borderRadius: 1,
                     bgcolor:
                       voice.status === "error"
-                        ? "rgba(248, 49, 37, 0.08)"
-                        : "rgba(68, 73, 156, 0.08)",
+                        ? alpha(theme.palette.error.main, 0.08)
+                        : alpha(theme.palette.primary.main, 0.08),
                     color:
                       voice.status === "error" ? "error.main" : "primary.dark",
                     minWidth: 0,
-                  }}
+                  })}
                 >
                   <Typography
                     variant="caption"
@@ -724,7 +733,7 @@ export default function ChatInterface({
                 {voiceBarsActive && (
                   <Box
                     aria-hidden="true"
-                    sx={{
+                    sx={(theme) => ({
                       display: "flex",
                       alignItems: "center",
                       gap: "3px",
@@ -733,10 +742,10 @@ export default function ChatInterface({
                       borderRadius: 1,
                       bgcolor:
                         voice.status === "speaking"
-                          ? "rgba(0, 159, 77, 0.08)"
-                          : "rgba(68, 73, 156, 0.06)",
+                          ? alpha(theme.palette.success.main, 0.08)
+                          : alpha(theme.palette.primary.main, 0.06),
                       flexShrink: 0,
-                    }}
+                    })}
                   >
                     {[0, 1, 2, 3].map((i) => (
                       <Box
@@ -829,13 +838,13 @@ export default function ChatInterface({
                     color="error"
                     onClick={voice.stop}
                     aria-label="End voice chat"
-                    sx={{
+                    sx={(theme) => ({
                       border: "1px solid",
-                      borderColor: "rgba(248, 49, 37, 0.22)",
-                      bgcolor: "rgba(248, 49, 37, 0.06)",
+                      borderColor: alpha(theme.palette.error.main, 0.22),
+                      bgcolor: alpha(theme.palette.error.main, 0.06),
                       width: 34,
                       height: 34,
-                    }}
+                    })}
                   >
                     <CallEndIcon />
                   </IconButton>
@@ -849,13 +858,13 @@ export default function ChatInterface({
                   onClick={handleVoiceStart}
                   disabled={isLoading || isComplete}
                   aria-label="Try voice chat again"
-                  sx={{
+                  sx={(theme) => ({
                     border: "1px solid",
-                    borderColor: "rgba(68, 73, 156, 0.22)",
-                    bgcolor: "rgba(68, 73, 156, 0.06)",
+                    borderColor: alpha(theme.palette.primary.main, 0.22),
+                    bgcolor: alpha(theme.palette.primary.main, 0.06),
                     width: 34,
                     height: 34,
-                  }}
+                  })}
                 >
                   <MicIcon />
                 </IconButton>
