@@ -29,7 +29,7 @@ Backend (run from `backend/`, virtualenv activated):
 pip install -r requirements.txt
 uvicorn app.main:app --reload                  # dev server at http://127.0.0.1:8000
 python -m compileall app                       # baseline syntax check
-python scripts/dump_catalog_to_yaml.py         # regenerate YAML catalog from seed_data
+python scripts/dump_catalog_to_yaml.py         # legacy seed_data.py → YAML migration utility; do NOT run on a curated YAML tree (overwrites it)
 python scripts/dedupe_catalog.py               # produce dedupe_review.csv
 ```
 
