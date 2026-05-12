@@ -1014,7 +1014,7 @@ async def _responses_flow(session: IntakeSession, user_text: str) -> IntakeMessa
     iterations = 0
     final_text = ""
 
-    while iterations <= settings.openai_max_tool_iterations:
+    while iterations < settings.openai_max_tool_iterations:
         instructions = _build_instructions(session)
 
         response = await client.responses.create(
@@ -2773,7 +2773,7 @@ async def generate_plan_summary(session: IntakeSession) -> str:
         response = await client.responses.create(
             model=settings.openai_model,
             input=[{"role": "user", "content": prompt}],
-            reasoning={"effort": "low"},
+            reasoning={"effort": settings.openai_reasoning_effort},
             max_output_tokens=120,
         )
         text = (response.output_text or "").strip()

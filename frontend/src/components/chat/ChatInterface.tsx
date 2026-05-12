@@ -39,9 +39,7 @@ export default function ChatInterface({
   initialMode = "text",
 }: ChatInterfaceProps) {
   const initialMessages = session.conversation ?? [];
-  const [messages, setMessages] = useState<IntakeMessage[]>(
-    initialMessages,
-  );
+  const [messages, setMessages] = useState<IntakeMessage[]>(initialMessages);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(
@@ -80,10 +78,13 @@ export default function ChatInterface({
           continue;
         }
         if (
-          next.slice(-4).some(
-            (existing) =>
-              existing.role === message.role && existing.content.trim() === text,
-          )
+          next
+            .slice(-4)
+            .some(
+              (existing) =>
+                existing.role === message.role &&
+                existing.content.trim() === text,
+            )
         ) {
           continue;
         }
@@ -620,7 +621,7 @@ export default function ChatInterface({
           bgcolor: "background.paper",
         }}
       >
-        {voice.isActive || voice.status === "error" ? (
+        {voice.isActive ? (
           <Box
             role="status"
             aria-label={voiceLabel}
@@ -784,7 +785,9 @@ export default function ChatInterface({
               </Box>
               <Typography
                 variant="caption"
-                color={voice.status === "error" ? "error.main" : "text.secondary"}
+                color={
+                  voice.status === "error" ? "error.main" : "text.secondary"
+                }
                 sx={{
                   display: "block",
                   overflow: "hidden",
@@ -798,11 +801,17 @@ export default function ChatInterface({
             </Box>
             {voice.isActive ? (
               <>
-                <Tooltip title={voice.isMuted ? "Unmute microphone" : "Mute microphone"}>
+                <Tooltip
+                  title={
+                    voice.isMuted ? "Unmute microphone" : "Mute microphone"
+                  }
+                >
                   <IconButton
                     size="small"
                     onClick={voice.toggleMute}
-                    aria-label={voice.isMuted ? "Unmute microphone" : "Mute microphone"}
+                    aria-label={
+                      voice.isMuted ? "Unmute microphone" : "Mute microphone"
+                    }
                     sx={{
                       border: "1px solid",
                       borderColor: "divider",
@@ -854,71 +863,95 @@ export default function ChatInterface({
             )}
           </Box>
         ) : (
-          <Box sx={{ display: "flex", gap: 1, alignItems: "flex-end" }}>
-            <Tooltip title="Start voice chat">
-              <span>
-                <IconButton
-                  color="primary"
-                  onClick={handleVoiceStart}
-                  disabled={isLoading || isComplete}
-                  aria-label="Start voice chat"
-                  sx={{
-                    bgcolor: "grey.100",
-                    color: "primary.main",
-                    width: 44,
-                    height: 44,
-                    "&:hover": { bgcolor: "grey.200" },
-                    "&:disabled": { bgcolor: "grey.200", color: "grey.500" },
-                  }}
-                >
-                  {voice.status === "connecting" ? (
-                    <CircularProgress size={20} />
-                  ) : (
-                    <MicIcon sx={{ fontSize: 20 }} />
-                  )}
-                </IconButton>
-              </span>
-            </Tooltip>
-            <TextField
-              inputRef={inputRef}
-              fullWidth
-              multiline
-              maxRows={4}
-              placeholder={isComplete ? "Intake complete" : "Type your message..."}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || isComplete}
-              variant="outlined"
-              size="small"
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: "24px",
-                  bgcolor: "grey.50",
-                },
-              }}
-            />
-            <IconButton
-              color="primary"
-              onClick={() => handleSend(inputValue)}
-              disabled={!inputValue.trim() || isLoading || isComplete}
-              aria-label="Send message"
-              sx={{
-                bgcolor: "primary.main",
-                color: "white",
-                width: 44,
-                height: 44,
-                "&:hover": { bgcolor: "primary.dark" },
-                "&:disabled": { bgcolor: "grey.300", color: "grey.500" },
-              }}
-            >
-              {isLoading ? (
-                <CircularProgress size={20} sx={{ color: "white" }} />
-              ) : (
-                <SendIcon sx={{ fontSize: 20 }} />
-              )}
-            </IconButton>
-          </Box>
+          <>
+            {voice.status === "error" && (
+              <Alert
+                severity="error"
+                sx={{ mb: 1, borderRadius: 2 }}
+                role="status"
+              >
+                {voice.error ||
+                  "Voice chat couldn't start. You can keep typing or try voice again."}
+              </Alert>
+            )}
+            <Box sx={{ display: "flex", gap: 1, alignItems: "flex-end" }}>
+              <Tooltip
+                title={
+                  voice.status === "error"
+                    ? "Try voice chat again"
+                    : "Start voice chat"
+                }
+              >
+                <span>
+                  <IconButton
+                    color="primary"
+                    onClick={handleVoiceStart}
+                    disabled={isLoading || isComplete}
+                    aria-label={
+                      voice.status === "error"
+                        ? "Try voice chat again"
+                        : "Start voice chat"
+                    }
+                    sx={{
+                      bgcolor: "grey.100",
+                      color: "primary.main",
+                      width: 44,
+                      height: 44,
+                      "&:hover": { bgcolor: "grey.200" },
+                      "&:disabled": { bgcolor: "grey.200", color: "grey.500" },
+                    }}
+                  >
+                    {voice.status === "connecting" ? (
+                      <CircularProgress size={20} />
+                    ) : (
+                      <MicIcon sx={{ fontSize: 20 }} />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <TextField
+                inputRef={inputRef}
+                fullWidth
+                multiline
+                maxRows={4}
+                placeholder={
+                  isComplete ? "Intake complete" : "Type your message..."
+                }
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || isComplete}
+                variant="outlined"
+                size="small"
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    borderRadius: "24px",
+                    bgcolor: "grey.50",
+                  },
+                }}
+              />
+              <IconButton
+                color="primary"
+                onClick={() => handleSend(inputValue)}
+                disabled={!inputValue.trim() || isLoading || isComplete}
+                aria-label="Send message"
+                sx={{
+                  bgcolor: "primary.main",
+                  color: "white",
+                  width: 44,
+                  height: 44,
+                  "&:hover": { bgcolor: "primary.dark" },
+                  "&:disabled": { bgcolor: "grey.300", color: "grey.500" },
+                }}
+              >
+                {isLoading ? (
+                  <CircularProgress size={20} sx={{ color: "white" }} />
+                ) : (
+                  <SendIcon sx={{ fontSize: 20 }} />
+                )}
+              </IconButton>
+            </Box>
+          </>
         )}
       </Box>
     </Box>

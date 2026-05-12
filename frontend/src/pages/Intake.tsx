@@ -23,13 +23,7 @@ import {
 import type { IntakeSession } from "@/types";
 
 type IntakeMode = "text" | "voice";
-type Phase =
-  | "checking"
-  | "choosing"
-  | "recovering"
-  | "starting"
-  | "ready"
-  | "error";
+type Phase = "checking" | "choosing" | "recovering" | "starting" | "ready";
 
 // Mirrors backend `_canonical_life_event_slug` in app/services/ai.py.
 // Keep these in sync; the backend is the source of truth for canonical slugs.
@@ -166,6 +160,9 @@ export default function Intake() {
 
   useEffect(() => {
     const requestId = ++intakeRequestIdRef.current;
+    // Search params changed, so any prior in-flight beginNewIntake() is now
+    // stale. Release the start lock so a fresh chooser click is not ignored.
+    isStartingRef.current = false;
     // If the user explicitly requested a fresh start (life-event entry or
     // ?fresh=1), skip the recovery prompt entirely.
     if (skipRecovery) {
@@ -205,6 +202,7 @@ export default function Intake() {
     isStartingRef.current = true;
     const requestId = ++intakeRequestIdRef.current;
     setSelectedMode(mode);
+    setError("");
     setPhase("starting");
     const language = getStoredLanguage();
     startIntake(language, lifeEvent, focus, mode)
@@ -218,12 +216,15 @@ export default function Intake() {
         setError(
           err.message || "Failed to start intake session. Please try again.",
         );
-        setPhase("error");
+        // Return to the chooser so the resident can retry or switch modes
+        // rather than landing in a dead-end error screen.
+        setPhase("choosing");
       })
       .finally(() => {
-        if (intakeRequestIdRef.current === requestId) {
-          isStartingRef.current = false;
-        }
+        // Always release the start lock — keeping it gated on the request id
+        // can strand the chooser if the in-flight start was invalidated
+        // (e.g., by searchParams change) before this finally fired.
+        isStartingRef.current = false;
       });
   };
 
@@ -376,6 +377,11 @@ export default function Intake() {
         }}
       >
         <Box sx={{ width: "100%", maxWidth: 760 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+              {error}
+            </Alert>
+          )}
           <Typography
             variant="h4"
             component="h1"
@@ -404,6 +410,7 @@ export default function Intake() {
               variant="contained"
               size="large"
               fullWidth
+              disableElevation
               onClick={() => beginNewIntake("voice")}
               sx={{
                 minHeight: 96,
@@ -415,6 +422,8 @@ export default function Intake() {
                 alignItems: "flex-start",
                 flexDirection: "column",
                 gap: 0.5,
+                textTransform: "none",
+                fontWeight: 600,
               }}
             >
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -435,6 +444,7 @@ export default function Intake() {
               variant="outlined"
               size="large"
               fullWidth
+              disableElevation
               onClick={() => beginNewIntake("text")}
               sx={{
                 minHeight: 96,
@@ -447,6 +457,8 @@ export default function Intake() {
                 flexDirection: "column",
                 gap: 0.5,
                 bgcolor: "background.paper",
+                textTransform: "none",
+                fontWeight: 600,
               }}
             >
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -487,24 +499,6 @@ export default function Intake() {
             ? "Checking your session..."
             : "Starting your session..."}
         </Typography>
-      </Box>
-    );
-  }
-
-  if (phase === "error") {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "calc(100vh - 64px)",
-          p: 3,
-        }}
-      >
-        <Alert severity="error" sx={{ maxWidth: 500 }}>
-          {error}
-        </Alert>
       </Box>
     );
   }

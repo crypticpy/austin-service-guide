@@ -812,6 +812,9 @@ export function useRealtimeVoiceSession({
           role,
           error: debugErrorMessage(err),
         });
+        // Tear down before transitioning to error so a retry doesn't leak
+        // the previous session's mic stream / WebRTC handles.
+        stopSessionRef.current?.();
         setError(
           err instanceof Error ? err.message : "Failed to sync transcript.",
         );
@@ -1238,6 +1241,7 @@ export function useRealtimeVoiceSession({
           unlockStartupMic();
         }
         if (response?.status === "failed") {
+          stopSessionRef.current?.();
           setError(
             response.status_details?.error?.message ||
               response.status_details?.reason ||
@@ -1316,6 +1320,7 @@ export function useRealtimeVoiceSession({
           "assistant",
           "I hit a voice connection problem. You can keep going, or restart voice chat if the microphone stopped.",
         );
+        stopSessionRef.current?.();
         setError(message);
         setStatus("error");
       }
@@ -1467,8 +1472,9 @@ export function useRealtimeVoiceSession({
             pc.connectionState === "failed" ||
             pc.connectionState === "disconnected"
           ) {
-            setStatus("error");
+            stop();
             setError("Realtime voice connection was interrupted.");
+            setStatus("error");
           }
         };
 
@@ -1578,8 +1584,9 @@ export function useRealtimeVoiceSession({
           recordDebug("data_channel_error", {
             ready_state: dc.readyState,
           });
-          setStatus("error");
+          stop();
           setError("Realtime voice data channel failed.");
+          setStatus("error");
         };
 
         const offer = await pc.createOffer();
