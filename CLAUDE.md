@@ -28,7 +28,7 @@ Backend (run from `backend/`, virtualenv activated):
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload                  # dev server at http://127.0.0.1:8000
-python -m compileall app                       # baseline syntax check (no test framework yet)
+python -m compileall app                       # baseline syntax check
 python scripts/dump_catalog_to_yaml.py         # regenerate YAML catalog from seed_data
 python scripts/dedupe_catalog.py               # produce dedupe_review.csv
 ```
@@ -44,7 +44,7 @@ npm run preview                                # serve the production build loca
 
 Environment: copy `backend/.env.example` to `backend/.env`. Key flags — `OPENAI_API_KEY` (enables live AI), `DEMO_MODE=true` (forces scripted fallback), `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, `OPENAI_MAX_TOOL_ITERATIONS`, `CORS_ORIGINS`, `PUBLIC_ORIGIN`. `settings.use_live_ai` is `True` only when an API key is set AND `DEMO_MODE` is false.
 
-No test framework is committed. `npm run build` and `python -m compileall backend/app` are the current verification gates.
+No test framework is committed yet. The verification gates are `npm run build` (from `frontend/`) and `python -m compileall app` (from `backend/`).
 
 ## Architecture
 
@@ -103,4 +103,4 @@ These patterns come from the starter template and must be followed:
 - Auth: FastAPI dependency injection (`Depends(require_auth)`).
 - Grid: MUI Grid v2 with `size` prop: `<Grid size={{ xs: 12, md: 6 }}>`.
 - Commits: Conventional Commits with scopes seen in history (`feat(intake):`, `fix(a11y):`, `chore(catalog):`, etc.). Keep subjects imperative.
-- Tests: none committed. Add frontend tests colocated with the component; backend tests under `backend/tests/test_*.py`.
+- Tests: when adding tests, colocate frontend tests with their component; place backend tests under `backend/tests/test_*.py`.
