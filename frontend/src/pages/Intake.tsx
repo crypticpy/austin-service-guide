@@ -23,7 +23,28 @@ import {
 import type { IntakeSession } from "@/types";
 
 type IntakeMode = "text" | "voice";
-type Phase = "checking" | "choosing" | "recovering" | "starting" | "ready" | "error";
+type Phase =
+  | "checking"
+  | "choosing"
+  | "recovering"
+  | "starting"
+  | "ready"
+  | "error";
+
+// Mirrors backend `_canonical_life_event_slug` in app/services/ai.py.
+// Keep these in sync; the backend is the source of truth for canonical slugs.
+const LIFE_EVENT_ALIASES: Record<string, string> = {
+  "job-loss": "lost-job",
+  "food-help": "need-food",
+  "having-baby": "new-baby",
+  "medical-help": "need-healthcare",
+  healthcare: "need-healthcare",
+  "senior-care": "senior-help",
+  veteran: "veteran-transition",
+  "veteran-benefits": "veteran-transition",
+  "legal-help": "legal-trouble",
+  childcare: "child-care",
+};
 
 const LIFE_EVENT_COPY: Record<string, { heading: string; body: string }> = {
   "lost-job": {
@@ -34,10 +55,6 @@ const LIFE_EVENT_COPY: Record<string, { heading: string; body: string }> = {
     heading: "You told us you need help with food.",
     body: "Our guide can help look for food pantries, meals, SNAP help, and related support. We'll ask a few questions to find options that fit.",
   },
-  "food-help": {
-    heading: "You told us you need help with food.",
-    body: "Our guide can help look for food pantries, meals, SNAP help, and related support. We'll ask a few questions to find options that fit.",
-  },
   "facing-eviction": {
     heading: "You told us you may be facing eviction or housing trouble.",
     body: "Our guide can help look for rent help, legal aid, shelter, and other housing support. We'll ask a few questions so we can point you in the right direction.",
@@ -45,10 +62,6 @@ const LIFE_EVENT_COPY: Record<string, { heading: string; body: string }> = {
   "housing-crisis": {
     heading: "You told us you're dealing with a housing problem.",
     body: "Our guide can help look for rent help, shelter, legal aid, and other housing support. We'll ask a few questions so we can point you in the right direction.",
-  },
-  "having-baby": {
-    heading: "You told us you're having a baby or growing your family.",
-    body: "Our guide can help look for WIC, prenatal care, childcare, and family support. We'll ask a few questions to find options that fit.",
   },
   "new-baby": {
     heading: "You told us you're having a baby or growing your family.",
@@ -69,10 +82,6 @@ const LIFE_EVENT_COPY: Record<string, { heading: string; body: string }> = {
   retiring: {
     heading: "You told us you're planning for retirement.",
     body: "Our guide can help look for senior services, healthcare, transportation, and community programs. We'll ask a few questions to find options that fit.",
-  },
-  "veteran-benefits": {
-    heading: "You told us you're looking for veteran support.",
-    body: "Our guide can help look for VA benefits, housing, healthcare, jobs, and related services. We'll ask a few questions to narrow it down.",
   },
   "veteran-transition": {
     heading: "You told us you're looking for veteran support.",
@@ -127,7 +136,8 @@ const LIFE_EVENT_COPY: Record<string, { heading: string; body: string }> = {
 function eventCopy(event?: string) {
   if (!event) return null;
   const normalized = event.trim().toLowerCase().replace(/_/g, "-");
-  return LIFE_EVENT_COPY[normalized] || null;
+  const canonical = LIFE_EVENT_ALIASES[normalized] ?? normalized;
+  return LIFE_EVENT_COPY[canonical] || null;
 }
 
 export default function Intake() {
@@ -413,7 +423,11 @@ export default function Intake() {
                   Voice conversation
                 </Typography>
               </Box>
-              <Typography component="span" variant="body2" sx={{ opacity: 0.9 }}>
+              <Typography
+                component="span"
+                variant="body2"
+                sx={{ opacity: 0.9 }}
+              >
                 Talk naturally with the guide.
               </Typography>
             </Button>
@@ -441,7 +455,11 @@ export default function Intake() {
                   Text chat
                 </Typography>
               </Box>
-              <Typography component="span" variant="body2" color="text.secondary">
+              <Typography
+                component="span"
+                variant="body2"
+                color="text.secondary"
+              >
                 Type messages at your pace.
               </Typography>
             </Button>
