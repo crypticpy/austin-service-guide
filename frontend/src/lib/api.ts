@@ -249,9 +249,14 @@ export interface RealtimeDebugEvent {
 // backend. When it's off, every recordDebug() call (status change, tool
 // dispatch, transport event…) would otherwise POST and get back a 404,
 // spamming the console. After the first 404 we latch this flag and skip
-// further POSTs for the rest of the page lifetime. console.debug() in the
-// caller still runs so local devs see events.
+// further POSTs. console.debug() in the caller still runs so local devs see
+// events. resetRealtimeDebugLogDisabled() clears the flag at the start of a
+// new realtime session so a config change doesn't require a page reload.
 let realtimeDebugLogDisabled = false;
+
+export function resetRealtimeDebugLogDisabled() {
+  realtimeDebugLogDisabled = false;
+}
 
 export function logRealtimeDebugEvent(
   sessionId: string,
@@ -261,7 +266,7 @@ export function logRealtimeDebugEvent(
     status?: string;
     detail?: Record<string, unknown>;
   },
-) {
+): Promise<{ ok: boolean; event: RealtimeDebugEvent } | null> {
   if (realtimeDebugLogDisabled) {
     return Promise.resolve(null);
   }
@@ -275,8 +280,13 @@ export function logRealtimeDebugEvent(
     },
     { timeoutMs: 5000 },
   ).catch((err) => {
+    // 404 = the debug endpoint is disabled server-side. Latch and swallow
+    // (recordDebug's caller chain already discards the result), so the burst
+    // of in-flight POSTs that fired before the first 404 arrived doesn't
+    // each surface as an unhandled rejection.
     if (err instanceof ApiError && err.status === 404) {
       realtimeDebugLogDisabled = true;
+      return null;
     }
     throw err;
   });

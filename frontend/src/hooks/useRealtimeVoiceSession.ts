@@ -3,6 +3,7 @@ import {
   createRealtimeClientSecret,
   executeRealtimeTool,
   logRealtimeDebugEvent,
+  resetRealtimeDebugLogDisabled,
   syncRealtimeTranscript,
   type RealtimeToolResult,
   type RealtimeTranscriptResult,
@@ -401,6 +402,15 @@ export function useRealtimeVoiceSession({
       setLiveTranscript(liveTranscriptRef.current);
     });
   }, []);
+
+  // Cancel any pending RAF flush on unmount so the scheduled callback can't
+  // call setLiveTranscript after the component is gone. stop() already cancels
+  // through clearLiveTranscript, but a parent unmount may skip stop().
+  useEffect(() => {
+    return () => {
+      cancelLiveTranscriptFlush();
+    };
+  }, [cancelLiveTranscriptFlush]);
 
   const commitLiveTranscript = useCallback(() => {
     const role = liveTranscriptRoleRef.current;
@@ -1446,6 +1456,9 @@ export function useRealtimeVoiceSession({
       stoppedRef.current = false;
       transcriptItemIdsRef.current.clear();
       resetSessionState();
+      // Re-arm debug logging in case a prior session latched it off after a
+      // 404. The server-side gate may have flipped on between sessions.
+      resetRealtimeDebugLogDisabled();
       setError("");
       clearLiveTranscript();
       setStatus("connecting");
