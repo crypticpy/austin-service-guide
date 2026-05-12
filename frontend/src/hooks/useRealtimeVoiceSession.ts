@@ -449,6 +449,25 @@ export function useRealtimeVoiceSession({
     setInputTracksEnabled(true);
   }, [setInputTracksEnabled]);
 
+  // Closes and nulls the WebRTC transport handles (mic stream, data channel,
+  // peer connection, playback audio). Idempotent — safe to call when refs are
+  // already null. Used by stop(), start() (defensive pre-clean), and any
+  // fatal-error path that does not go through stop().
+  const teardownTransport = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    dcRef.current?.close();
+    dcRef.current = null;
+    pcRef.current?.close();
+    pcRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.srcObject = null;
+      audioRef.current.remove();
+      audioRef.current = null;
+    }
+  }, []);
+
   // Resets the shared session refs and pending timers that both start() and stop()
   // need to clear. Stop-only teardown (thinking watchdog, transport handles, status)
   // remains inline in stop(); start-only seed state (stoppedRef=false, transcript
@@ -522,20 +541,9 @@ export function useRealtimeVoiceSession({
     thinkingStartedAtRef.current = null;
     clearLiveTranscript();
     setIsMuted(false);
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    dcRef.current?.close();
-    dcRef.current = null;
-    pcRef.current?.close();
-    pcRef.current = null;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.srcObject = null;
-      audioRef.current.remove();
-      audioRef.current = null;
-    }
+    teardownTransport();
     setStatus("idle");
-  }, [clearLiveTranscript, recordDebug, resetSessionState]);
+  }, [clearLiveTranscript, recordDebug, resetSessionState, teardownTransport]);
 
   useEffect(() => {
     stopSessionRef.current = stop;
@@ -1385,25 +1393,7 @@ export function useRealtimeVoiceSession({
       // Defensive teardown: if a previous session left transport handles
       // around (e.g., a fatal-error path before stop() was reachable), close
       // them now before we allocate new ones to avoid mic + WebRTC leaks.
-      if (
-        streamRef.current ||
-        dcRef.current ||
-        pcRef.current ||
-        audioRef.current
-      ) {
-        streamRef.current?.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-        dcRef.current?.close();
-        dcRef.current = null;
-        pcRef.current?.close();
-        pcRef.current = null;
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current.srcObject = null;
-          audioRef.current.remove();
-          audioRef.current = null;
-        }
-      }
+      teardownTransport();
       stoppedRef.current = false;
       transcriptItemIdsRef.current.clear();
       resetSessionState();
@@ -1685,6 +1675,7 @@ export function useRealtimeVoiceSession({
       sessionId,
       setInputTracksEnabled,
       stop,
+      teardownTransport,
       unlockStartupMic,
     ],
   );
