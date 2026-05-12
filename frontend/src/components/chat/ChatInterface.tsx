@@ -498,11 +498,16 @@ export default function ChatInterface({
               message={msg}
               onButtonClick={handleButtonClick}
               isLatest={idx === arr.length - 1}
-              // During voice the latest bubble is replacing the live-
-              // streaming bubble in place; replaying the entry animation
-              // makes it feel like a redraw. Suppress it so the swap is
-              // visually seamless.
-              suppressEntryAnimation={voice.isActive && idx === arr.length - 1}
+              // During voice the latest assistant bubble is replacing the
+              // live-streaming bubble in place; replaying the entry
+              // animation makes that swap feel like a redraw. Suppress it
+              // only for the assistant turn — user bubbles should still
+              // fade in normally since nothing was streaming there.
+              suppressEntryAnimation={
+                voice.isActive &&
+                idx === arr.length - 1 &&
+                msg.role === "assistant"
+              }
             />
           ))}
 

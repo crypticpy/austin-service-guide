@@ -280,16 +280,29 @@ export function logRealtimeDebugEvent(
     },
     { timeoutMs: 5000 },
   ).catch((err) => {
-    // 404 = the debug endpoint is disabled server-side. Latch and swallow
-    // (recordDebug's caller chain already discards the result), so the burst
-    // of in-flight POSTs that fired before the first 404 arrived doesn't
-    // each surface as an unhandled rejection.
+    // 404 with detail="Not found" means the endpoint itself is disabled
+    // (REALTIME_DEBUG_LOG_ENABLED=false). Latch and swallow so the burst of
+    // in-flight POSTs that fired before the first 404 arrived doesn't each
+    // surface as an unhandled rejection. A 404 with detail="Session not
+    // found" means just this sessionId is stale — don't latch, since a
+    // subsequent valid session should still log.
     if (err instanceof ApiError && err.status === 404) {
-      realtimeDebugLogDisabled = true;
+      if (isDebugEndpointDisabledDetail(err.message)) {
+        realtimeDebugLogDisabled = true;
+      }
       return null;
     }
     throw err;
   });
+}
+
+function isDebugEndpointDisabledDetail(message: string): boolean {
+  try {
+    const parsed = JSON.parse(message) as { detail?: unknown };
+    return parsed?.detail === "Not found";
+  } catch {
+    return false;
+  }
 }
 
 export function getRealtimeDebugEvents(sessionId: string, limit = 200) {

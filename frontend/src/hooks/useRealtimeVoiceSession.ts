@@ -953,22 +953,27 @@ export function useRealtimeVoiceSession({
           }
           // Push refreshed instructions BEFORE the function_call_output so
           // the next response uses the updated "Currently known" snapshot.
+          // Only advance lastPushedInstructionsRef if sendEvent actually
+          // dispatched — otherwise a dropped data channel would suppress
+          // future retries of the same instructions.
           const refreshed = result.refreshed_instructions;
           if (
             typeof refreshed === "string" &&
             refreshed.length > 0 &&
             refreshed !== lastPushedInstructionsRef.current
           ) {
-            lastPushedInstructionsRef.current = refreshed;
-            recordDebug("session_update_instructions_refreshed", {
-              tool: call.name,
-              call_id: call.call_id,
-              length: refreshed.length,
-            });
-            sendEvent({
+            const sent = sendEvent({
               type: "session.update",
               session: { type: "realtime", instructions: refreshed },
             });
+            if (sent) {
+              lastPushedInstructionsRef.current = refreshed;
+              recordDebug("session_update_instructions_refreshed", {
+                tool: call.name,
+                call_id: call.call_id,
+                length: refreshed.length,
+              });
+            }
           }
           sendEvent({
             type: "conversation.item.create",
@@ -1057,15 +1062,21 @@ export function useRealtimeVoiceSession({
             typeof sessionConfigRef.current.instructions === "string"
               ? (sessionConfigRef.current.instructions as string)
               : "";
-          lastPushedInstructionsRef.current = initialInstructions;
           recordDebug(
             "session_update_sent",
             realtimeSessionSummary(sessionConfigRef.current),
           );
-          sendEvent({
+          const sent = sendEvent({
             type: "session.update",
             session: sessionConfigRef.current,
           });
+          if (sent) {
+            // Only seed the diff baseline after the channel actually
+            // accepted the update. If sendEvent dropped (data channel not
+            // open yet), the first post-tool refresh will resend the same
+            // snapshot rather than being suppressed as a no-op.
+            lastPushedInstructionsRef.current = initialInstructions;
+          }
           if (sessionUpdateTimerRef.current) {
             window.clearTimeout(sessionUpdateTimerRef.current);
           }

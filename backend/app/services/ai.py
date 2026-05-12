@@ -739,7 +739,12 @@ def _format_known_facts(session: IntakeSession) -> str:
     profile = session.extracted_profile
     parts: list[str] = []
     if profile.immediate_needs:
-        parts.append(f"needs={profile.immediate_needs}")
+        # Sort + comma-join so equivalent sets always serialize the same way.
+        # immediate_needs is merged through a set in _tool_extract_profile,
+        # so without this the diff check against lastPushedInstructions
+        # would trip on cosmetic reordering and emit spurious session.update.
+        needs = sorted({str(n) for n in profile.immediate_needs})
+        parts.append("needs=" + "|".join(needs))
     if profile.household_size:
         parts.append(f"household_size={profile.household_size}")
     if profile.zip_code:
@@ -752,20 +757,27 @@ def _format_known_facts(session: IntakeSession) -> str:
         parts.append(f"income={profile.income_bracket}")
     if profile.insurance_status:
         parts.append(f"insurance={profile.insurance_status}")
+    # For bool|None fields, emit both true and false so an explicit "no" is
+    # captured in the snapshot — otherwise the model may re-ask a question
+    # the resident has already answered negatively.
     if profile.has_children is not None:
-        parts.append(f"has_children={profile.has_children}")
+        parts.append(f"has_children={str(profile.has_children).lower()}")
     if profile.veteran_status is not None:
-        parts.append(f"veteran={profile.veteran_status}")
+        parts.append(f"veteran={str(profile.veteran_status).lower()}")
     if profile.has_disability is not None:
-        parts.append(f"has_disability={profile.has_disability}")
-    if profile.is_outdoor_worker:
-        parts.append("outdoor_worker=true")
-    if profile.has_ac is False:
-        parts.append("has_ac=false")
-    if profile.has_chronic_conditions:
-        parts.append("chronic_conditions=true")
-    if profile.is_refugee_or_immigrant:
-        parts.append("refugee_or_immigrant=true")
+        parts.append(f"has_disability={str(profile.has_disability).lower()}")
+    if profile.is_outdoor_worker is not None:
+        parts.append(f"outdoor_worker={str(profile.is_outdoor_worker).lower()}")
+    if profile.has_ac is not None:
+        parts.append(f"has_ac={str(profile.has_ac).lower()}")
+    if profile.has_chronic_conditions is not None:
+        parts.append(
+            f"chronic_conditions={str(profile.has_chronic_conditions).lower()}"
+        )
+    if profile.is_refugee_or_immigrant is not None:
+        parts.append(
+            f"refugee_or_immigrant={str(profile.is_refugee_or_immigrant).lower()}"
+        )
     if profile.primary_language:
         parts.append(f"primary_language={profile.primary_language}")
     if profile.school_age_children:
