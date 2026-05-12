@@ -97,7 +97,10 @@ function messageContent(message: IntakeMessage) {
 
 function startErrorMessage(err: unknown) {
   if (err instanceof DOMException) {
-    if (err.name === "NotAllowedError" || err.message.includes("Permission denied")) {
+    if (
+      err.name === "NotAllowedError" ||
+      err.message.includes("Permission denied")
+    ) {
       return "Microphone permission is blocked. Allow microphone access and try voice chat again.";
     }
     if (err.name === "NotFoundError") {
@@ -196,8 +199,12 @@ export function useRealtimeVoiceSession({
   const stoppedRef = useRef(false);
   const transcriptItemIdsRef = useRef<Set<string>>(new Set());
   const stopAfterNextAssistantRef = useRef(false);
-  const pendingCompletionResultRef = useRef<RealtimeTranscriptResult | null>(null);
-  const pendingCompletionToolResultRef = useRef<RealtimeToolResult | null>(null);
+  const pendingCompletionResultRef = useRef<RealtimeTranscriptResult | null>(
+    null,
+  );
+  const pendingCompletionToolResultRef = useRef<RealtimeToolResult | null>(
+    null,
+  );
   const completionFlowRef = useRef(false);
   const finalResponseDoneRef = useRef(false);
   const completionTimerRef = useRef<number | null>(null);
@@ -339,24 +346,24 @@ export function useRealtimeVoiceSession({
     };
   }, [recordDebug, status]);
 
-  const sendEvent = useCallback((event: Record<string, unknown>) => {
-    const dc = dcRef.current;
-    if (!dc || dc.readyState !== "open") {
-      recordDebug("data_channel_send_dropped", {
-        type: event.type,
-        ready_state: dc?.readyState || "missing",
-      });
-      return false;
-    }
-    dc.send(JSON.stringify(event));
-    return true;
-  }, [recordDebug]);
+  const sendEvent = useCallback(
+    (event: Record<string, unknown>) => {
+      const dc = dcRef.current;
+      if (!dc || dc.readyState !== "open") {
+        recordDebug("data_channel_send_dropped", {
+          type: event.type,
+          ready_state: dc?.readyState || "missing",
+        });
+        return false;
+      }
+      dc.send(JSON.stringify(event));
+      return true;
+    },
+    [recordDebug],
+  );
 
   const requestModelResponse = useCallback(
-    (
-      reason: string,
-      response?: Record<string, unknown>,
-    ) => {
+    (reason: string, response?: Record<string, unknown>) => {
       const event: Record<string, unknown> = { type: "response.create" };
       if (response) event.response = response;
       recordDebug("response_create_sent", {
@@ -442,13 +449,11 @@ export function useRealtimeVoiceSession({
     setInputTracksEnabled(true);
   }, [setInputTracksEnabled]);
 
-  const stop = useCallback(() => {
-    startGenerationRef.current += 1;
-    recordDebug("voice_stop_requested", {
-      previous_status: statusRef.current,
-      last_realtime_event_type: lastRealtimeEventTypeRef.current,
-    });
-    stoppedRef.current = true;
+  // Resets the shared session refs and pending timers that both start() and stop()
+  // need to clear. Stop-only teardown (thinking watchdog, transport handles, status)
+  // remains inline in stop(); start-only seed state (stoppedRef=false, transcript
+  // ids) remains inline in start().
+  const resetSessionState = useCallback(() => {
     stopAfterNextAssistantRef.current = false;
     pendingCompletionResultRef.current = null;
     pendingCompletionToolResultRef.current = null;
@@ -488,11 +493,6 @@ export function useRealtimeVoiceSession({
       window.clearTimeout(initialResponseTimerRef.current);
       initialResponseTimerRef.current = null;
     }
-    if (thinkingWatchdogTimerRef.current) {
-      window.clearTimeout(thinkingWatchdogTimerRef.current);
-      thinkingWatchdogTimerRef.current = null;
-    }
-    thinkingStartedAtRef.current = null;
     dataChannelOpenRef.current = false;
     sessionReadyRef.current = false;
     sessionCreatedRef.current = false;
@@ -505,6 +505,21 @@ export function useRealtimeVoiceSession({
     }
     initialResponseEventRef.current = null;
     initialGreetingTextRef.current = "";
+  }, []);
+
+  const stop = useCallback(() => {
+    startGenerationRef.current += 1;
+    recordDebug("voice_stop_requested", {
+      previous_status: statusRef.current,
+      last_realtime_event_type: lastRealtimeEventTypeRef.current,
+    });
+    stoppedRef.current = true;
+    resetSessionState();
+    if (thinkingWatchdogTimerRef.current) {
+      window.clearTimeout(thinkingWatchdogTimerRef.current);
+      thinkingWatchdogTimerRef.current = null;
+    }
+    thinkingStartedAtRef.current = null;
     clearLiveTranscript();
     setIsMuted(false);
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -520,7 +535,7 @@ export function useRealtimeVoiceSession({
       audioRef.current = null;
     }
     setStatus("idle");
-  }, [clearLiveTranscript, recordDebug]);
+  }, [clearLiveTranscript, recordDebug, resetSessionState]);
 
   useEffect(() => {
     stopSessionRef.current = stop;
@@ -580,7 +595,10 @@ export function useRealtimeVoiceSession({
         }
         if (initialResponseAttemptsRef.current < 2) {
           initialResponseTimerRef.current = window.setTimeout(() => {
-            if (!initialResponseAcknowledgedRef.current && !stoppedRef.current) {
+            if (
+              !initialResponseAcknowledgedRef.current &&
+              !stoppedRef.current
+            ) {
               recordDebug("startup_response_retry_scheduled", {
                 attempt: initialResponseAttemptsRef.current + 1,
               });
@@ -612,91 +630,106 @@ export function useRealtimeVoiceSession({
     );
   }, []);
 
-  const scheduleCompletionFinish = useCallback((reason = "completion_ready") => {
-    if (completionRenderScheduledRef.current || stoppedRef.current) return;
-    const completionResult = pendingCompletionResultRef.current;
-    const completionToolResult = pendingCompletionToolResultRef.current;
+  const scheduleCompletionFinish = useCallback(
+    (reason = "completion_ready") => {
+      if (completionRenderScheduledRef.current || stoppedRef.current) return;
+      const completionResult = pendingCompletionResultRef.current;
+      const completionToolResult = pendingCompletionToolResultRef.current;
 
-    if (!completionResult && !completionToolResult) return;
+      if (!completionResult && !completionToolResult) return;
 
-    if (finalResponseIdRef.current && !finalResponseDoneRef.current) {
-      recordDebug("completion_waiting_for_response_done", {
-        reason,
-        final_response_id: finalResponseIdRef.current,
-      });
-      return;
-    }
-
-    if (finalResponseDoneRef.current && !finalAudioStoppedRef.current) {
-      setStatus(finalAudioStartedRef.current ? "speaking" : "finalizing");
-      if (!finalAudioFallbackTimerRef.current) {
-        const delayMs = finalAudioFallbackDelay();
-        recordDebug("completion_waiting_for_final_audio", {
+      if (finalResponseIdRef.current && !finalResponseDoneRef.current) {
+        recordDebug("completion_waiting_for_response_done", {
           reason,
-          final_response_id: finalResponseIdRef.current || null,
-          audio_started: finalAudioStartedRef.current,
-          fallback_delay_ms: delayMs,
-          final_text_length: finalAssistantTextLengthRef.current,
-          audio_elapsed_ms:
-            finalAudioStartedAtRef.current === null
-              ? null
-              : Math.max(0, Date.now() - finalAudioStartedAtRef.current),
+          final_response_id: finalResponseIdRef.current,
         });
-        finalAudioFallbackTimerRef.current = window.setTimeout(() => {
-          finalAudioFallbackTimerRef.current = null;
-          if (stoppedRef.current || completionRenderScheduledRef.current) return;
-          finalAudioStoppedRef.current = true;
-          recordDebug("completion_final_audio_fallback_elapsed", {
+        return;
+      }
+
+      if (finalResponseDoneRef.current && !finalAudioStoppedRef.current) {
+        setStatus(finalAudioStartedRef.current ? "speaking" : "finalizing");
+        if (!finalAudioFallbackTimerRef.current) {
+          const delayMs = finalAudioFallbackDelay();
+          recordDebug("completion_waiting_for_final_audio", {
+            reason,
             final_response_id: finalResponseIdRef.current || null,
+            audio_started: finalAudioStartedRef.current,
+            fallback_delay_ms: delayMs,
+            final_text_length: finalAssistantTextLengthRef.current,
+            audio_elapsed_ms:
+              finalAudioStartedAtRef.current === null
+                ? null
+                : Math.max(0, Date.now() - finalAudioStartedAtRef.current),
           });
-          scheduleCompletionFinish("final_audio_fallback_elapsed");
-        }, delayMs);
-      }
-      return;
-    }
-
-    completionRenderScheduledRef.current = true;
-    stopAfterNextAssistantRef.current = false;
-    if (completionFallbackTimerRef.current) {
-      window.clearTimeout(completionFallbackTimerRef.current);
-      completionFallbackTimerRef.current = null;
-    }
-    if (finalAudioFallbackTimerRef.current) {
-      window.clearTimeout(finalAudioFallbackTimerRef.current);
-      finalAudioFallbackTimerRef.current = null;
-    }
-    recordDebug("completion_finish_scheduled", {
-      reason,
-      source: completionResult ? "assistant_transcript" : "tool_result",
-      final_response_id: finalResponseIdRef.current || null,
-      audio_started: finalAudioStartedRef.current,
-      audio_stopped: finalAudioStoppedRef.current,
-      progress_percent:
-        completionResult?.progress_percent ?? completionToolResult?.progress_percent,
-      message_count: completionResult?.messages.length ?? 0,
-      match_count: completionToolResult?.match_count,
-      render_delay_ms: FINAL_PLAN_RENDER_DELAY_MS,
-      stop_delay_ms: FINAL_VOICE_STOP_DELAY_MS,
-    });
-    setStatus("finalizing");
-
-    completionTimerRef.current = window.setTimeout(() => {
-      if (!stoppedRef.current) {
-        if (completionResult) {
-          onTranscriptSyncRef.current({ ...completionResult, is_complete: true });
-        } else if (completionToolResult) {
-          onToolResultRef.current({ ...completionToolResult, is_complete: true });
+          finalAudioFallbackTimerRef.current = window.setTimeout(() => {
+            finalAudioFallbackTimerRef.current = null;
+            if (stoppedRef.current || completionRenderScheduledRef.current)
+              return;
+            finalAudioStoppedRef.current = true;
+            recordDebug("completion_final_audio_fallback_elapsed", {
+              final_response_id: finalResponseIdRef.current || null,
+            });
+            scheduleCompletionFinish("final_audio_fallback_elapsed");
+          }, delayMs);
         }
+        return;
       }
-      pendingCompletionResultRef.current = null;
-      pendingCompletionToolResultRef.current = null;
-      completionTimerRef.current = window.setTimeout(stop, FINAL_VOICE_STOP_DELAY_MS);
-    }, FINAL_PLAN_RENDER_DELAY_MS);
-  }, [finalAudioFallbackDelay, recordDebug, stop]);
+
+      completionRenderScheduledRef.current = true;
+      stopAfterNextAssistantRef.current = false;
+      if (completionFallbackTimerRef.current) {
+        window.clearTimeout(completionFallbackTimerRef.current);
+        completionFallbackTimerRef.current = null;
+      }
+      if (finalAudioFallbackTimerRef.current) {
+        window.clearTimeout(finalAudioFallbackTimerRef.current);
+        finalAudioFallbackTimerRef.current = null;
+      }
+      recordDebug("completion_finish_scheduled", {
+        reason,
+        source: completionResult ? "assistant_transcript" : "tool_result",
+        final_response_id: finalResponseIdRef.current || null,
+        audio_started: finalAudioStartedRef.current,
+        audio_stopped: finalAudioStoppedRef.current,
+        progress_percent:
+          completionResult?.progress_percent ??
+          completionToolResult?.progress_percent,
+        message_count: completionResult?.messages.length ?? 0,
+        match_count: completionToolResult?.match_count,
+        render_delay_ms: FINAL_PLAN_RENDER_DELAY_MS,
+        stop_delay_ms: FINAL_VOICE_STOP_DELAY_MS,
+      });
+      setStatus("finalizing");
+
+      completionTimerRef.current = window.setTimeout(() => {
+        if (!stoppedRef.current) {
+          if (completionResult) {
+            onTranscriptSyncRef.current({
+              ...completionResult,
+              is_complete: true,
+            });
+          } else if (completionToolResult) {
+            onToolResultRef.current({
+              ...completionToolResult,
+              is_complete: true,
+            });
+          }
+        }
+        pendingCompletionResultRef.current = null;
+        pendingCompletionToolResultRef.current = null;
+        completionTimerRef.current = window.setTimeout(
+          stop,
+          FINAL_VOICE_STOP_DELAY_MS,
+        );
+      }, FINAL_PLAN_RENDER_DELAY_MS);
+    },
+    [finalAudioFallbackDelay, recordDebug, stop],
+  );
 
   const finishCompletionFromToolResult = useCallback(
     (reason: string) => {
-      if (!pendingCompletionToolResultRef.current || stoppedRef.current) return false;
+      if (!pendingCompletionToolResultRef.current || stoppedRef.current)
+        return false;
       scheduleCompletionFinish(reason);
       return true;
     },
@@ -724,7 +757,10 @@ export function useRealtimeVoiceSession({
       });
       onLocalTranscriptRef.current(role, text);
       try {
-        const result = await syncRealtimeTranscript(sessionId, { role, content: text });
+        const result = await syncRealtimeTranscript(sessionId, {
+          role,
+          content: text,
+        });
         if (stoppedRef.current || generation !== startGenerationRef.current) {
           recordDebug("transcript_sync_ignored", {
             role,
@@ -761,7 +797,10 @@ export function useRealtimeVoiceSession({
           syncedResult.is_complete
         ) {
           finalAssistantTextLengthRef.current = text.length;
-          pendingCompletionResultRef.current = { ...syncedResult, messages: [] };
+          pendingCompletionResultRef.current = {
+            ...syncedResult,
+            messages: [],
+          };
           onTranscriptSyncRef.current({ ...syncedResult, is_complete: false });
           scheduleCompletionFinish("assistant_transcript_synced");
         } else {
@@ -773,7 +812,9 @@ export function useRealtimeVoiceSession({
           role,
           error: debugErrorMessage(err),
         });
-        setError(err instanceof Error ? err.message : "Failed to sync transcript.");
+        setError(
+          err instanceof Error ? err.message : "Failed to sync transcript.",
+        );
         setStatus("error");
         return false;
       } finally {
@@ -895,7 +936,8 @@ export function useRealtimeVoiceSession({
               type: "function_call_output",
               call_id: call.call_id,
               output: JSON.stringify({
-                error: err instanceof Error ? err.message : "Tool execution failed.",
+                error:
+                  err instanceof Error ? err.message : "Tool execution failed.",
               }),
             },
           });
@@ -945,7 +987,10 @@ export function useRealtimeVoiceSession({
         }
         if (!sessionUpdateSentRef.current && sessionConfigRef.current) {
           sessionUpdateSentRef.current = true;
-          recordDebug("session_update_sent", realtimeSessionSummary(sessionConfigRef.current));
+          recordDebug(
+            "session_update_sent",
+            realtimeSessionSummary(sessionConfigRef.current),
+          );
           sendEvent({
             type: "session.update",
             session: sessionConfigRef.current,
@@ -1106,7 +1151,8 @@ export function useRealtimeVoiceSession({
           content_length: transcript.trim().length,
           content_preview: clipDebugText(transcript, 240),
         });
-        if (itemId && transcript.trim()) transcriptItemIdsRef.current.add(itemId);
+        if (itemId && transcript.trim())
+          transcriptItemIdsRef.current.add(itemId);
         void (async () => {
           const synced = await syncTranscript("user", transcript);
           if (
@@ -1145,7 +1191,8 @@ export function useRealtimeVoiceSession({
           content_length: transcript.trim().length,
           content_preview: clipDebugText(transcript, 240),
         });
-        if (itemId && transcript.trim()) transcriptItemIdsRef.current.add(itemId);
+        if (itemId && transcript.trim())
+          transcriptItemIdsRef.current.add(itemId);
         void syncTranscript("assistant", transcript);
         return;
       }
@@ -1156,7 +1203,10 @@ export function useRealtimeVoiceSession({
               metadata?: Record<string, unknown>;
               output?: unknown[];
               status?: string;
-              status_details?: { error?: { message?: string }; reason?: string };
+              status_details?: {
+                error?: { message?: string };
+                reason?: string;
+              };
             }
           | undefined;
         const doneResponseId = response?.id || responseId;
@@ -1239,7 +1289,9 @@ export function useRealtimeVoiceSession({
         }
         if (stopAfterNextAssistantRef.current || completionFlowRef.current) {
           finalResponseDoneRef.current = true;
-          if (!(finalAudioStartedRef.current && !finalAudioStoppedRef.current)) {
+          if (
+            !(finalAudioStartedRef.current && !finalAudioStoppedRef.current)
+          ) {
             setStatus("finalizing");
           }
           scheduleCompletionFinish("response_done");
@@ -1327,63 +1379,15 @@ export function useRealtimeVoiceSession({
 
       stoppedRef.current = false;
       transcriptItemIdsRef.current.clear();
-      stopAfterNextAssistantRef.current = false;
-      pendingCompletionResultRef.current = null;
-      pendingCompletionToolResultRef.current = null;
-      completionFlowRef.current = false;
-      finalResponseDoneRef.current = false;
-      if (completionTimerRef.current) {
-        window.clearTimeout(completionTimerRef.current);
-        completionTimerRef.current = null;
-      }
-      if (completionFallbackTimerRef.current) {
-        window.clearTimeout(completionFallbackTimerRef.current);
-        completionFallbackTimerRef.current = null;
-      }
-      if (finalAudioFallbackTimerRef.current) {
-        window.clearTimeout(finalAudioFallbackTimerRef.current);
-        finalAudioFallbackTimerRef.current = null;
-      }
-      completionRenderScheduledRef.current = false;
-      finalResponseIdRef.current = "";
-      finalAudioStartedRef.current = false;
-      finalAudioStoppedRef.current = false;
-      finalAudioStartedAtRef.current = null;
-      finalAssistantTextLengthRef.current = 0;
-      initialResponseSentRef.current = false;
-      initialResponseAcknowledgedRef.current = false;
-      initialResponseAttemptsRef.current = 0;
-      initialResponseIdRef.current = "";
-      startupResponsePendingRef.current = false;
-      startupResponseActiveRef.current = false;
-      startupMicLockedRef.current = false;
-      isMutedRef.current = false;
-      if (startupMicUnlockTimerRef.current) {
-        window.clearTimeout(startupMicUnlockTimerRef.current);
-        startupMicUnlockTimerRef.current = null;
-      }
-      if (initialResponseTimerRef.current) {
-        window.clearTimeout(initialResponseTimerRef.current);
-        initialResponseTimerRef.current = null;
-      }
-      dataChannelOpenRef.current = false;
-      sessionReadyRef.current = false;
-      sessionCreatedRef.current = false;
-      sessionUpdateSentRef.current = false;
-      sessionUpdatedRef.current = false;
-      sessionConfigRef.current = null;
-      if (sessionUpdateTimerRef.current) {
-        window.clearTimeout(sessionUpdateTimerRef.current);
-        sessionUpdateTimerRef.current = null;
-      }
-      initialResponseEventRef.current = null;
-      initialGreetingTextRef.current = "";
+      resetSessionState();
       setError("");
       clearLiveTranscript();
       setStatus("connecting");
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
         ownedStream = stream;
         if (startCancelled()) {
           cleanupOwnedStart();
@@ -1459,7 +1463,10 @@ export function useRealtimeVoiceSession({
             connection_state: pc.connectionState,
             ice_connection_state: pc.iceConnectionState,
           });
-          if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          if (
+            pc.connectionState === "failed" ||
+            pc.connectionState === "disconnected"
+          ) {
             setStatus("error");
             setError("Realtime voice connection was interrupted.");
           }
@@ -1478,12 +1485,15 @@ export function useRealtimeVoiceSession({
             conversation_length: conversation.length,
           });
           const introText =
-            conversation.find((m) => m.role === "assistant" && m.content.trim())
+            conversation
+              .find((m) => m.role === "assistant" && m.content.trim())
               ?.content.trim() || "";
           const shouldSpeakInitialGreeting =
             !!options.speakInitialGreeting && !!introText;
           let skippedInitialGreeting = false;
-          for (const message of conversation.filter((m) => m.role !== "system")) {
+          for (const message of conversation.filter(
+            (m) => m.role !== "system",
+          )) {
             if (
               shouldSpeakInitialGreeting &&
               !skippedInitialGreeting &&
@@ -1495,7 +1505,9 @@ export function useRealtimeVoiceSession({
             }
             const item = messageContent(message);
             if (item) {
-              dc.send(JSON.stringify({ type: "conversation.item.create", item }));
+              dc.send(
+                JSON.stringify({ type: "conversation.item.create", item }),
+              );
             }
           }
           recordDebug("conversation_history_preloaded", {
@@ -1635,8 +1647,10 @@ export function useRealtimeVoiceSession({
       }
     },
     [
+      clearLiveTranscript,
       handleRealtimeEvent,
       recordDebug,
+      resetSessionState,
       sendInitialResponseWhenReady,
       sessionId,
       setInputTracksEnabled,
